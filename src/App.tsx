@@ -3,6 +3,8 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { AppLayout } from './components/layout/AppLayout';
 import { LoginForm } from './components/auth/LoginForm';
 import { DashboardsPage } from './pages/DashboardsPage';
+import { NewDashboardPage } from './pages/NewDashboardPage';
+import { DashboardViewPage } from './pages/DashboardViewPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { SalesforceSettingsPage } from './pages/SalesforceSettingsPage';
 
@@ -58,6 +60,22 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <DashboardsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dashboards/new"
+        element={
+          <ProtectedRoute>
+            <NewDashboardPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dashboards/:id"
+        element={
+          <ProtectedRoute>
+            <DashboardViewPage />
           </ProtectedRoute>
         }
       />
