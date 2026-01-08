@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Settings, Share2, Loader2 } from 'lucide-react';
-import { db } from '../lib/supabase';
+import { ArrowLeft, Settings, Share2, Loader2, RefreshCw } from 'lucide-react';
+import { db, supabase } from '../lib/supabase';
 import { BarChart } from '../components/charts/BarChart';
 import { LineChart } from '../components/charts/LineChart';
 import { PieChart } from '../components/charts/PieChart';
@@ -39,6 +39,7 @@ export function DashboardViewPage() {
   const [widgets, setWidgets] = useState<Widget[]>([]);
   const [widgetData, setWidgetData] = useState<Record<string, ReportSnapshot>>({});
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -46,6 +47,43 @@ export function DashboardViewPage() {
       loadDashboard(id);
     }
   }, [id]);
+
+  const fetchReportData = async (reportId: string): Promise<ReportSnapshot | null> => {
+    try {
+      const { data, error } = await supabase.functions.invoke('salesforce-fetch-report', {
+        body: { report_id: reportId },
+      });
+
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      return {
+        data: data.data || [],
+        captured_at: new Date().toISOString(),
+      };
+    } catch (err) {
+      console.error('Error fetching report:', err);
+      return null;
+    }
+  };
+
+  const refreshData = async () => {
+    if (!widgets.length) return;
+
+    setRefreshing(true);
+    const reportIds = [...new Set(widgets.map((w) => w.sf_report_id))];
+    const dataMap: Record<string, ReportSnapshot> = {};
+
+    for (const reportId of reportIds) {
+      const snapshot = await fetchReportData(reportId);
+      if (snapshot) {
+        dataMap[reportId] = snapshot;
+      }
+    }
+
+    setWidgetData(dataMap);
+    setRefreshing(false);
+  };
 
   const loadDashboard = async (dashboardId: string) => {
     try {
@@ -70,6 +108,7 @@ export function DashboardViewPage() {
       const dataMap: Record<string, ReportSnapshot> = {};
 
       for (const reportId of reportIds) {
+        // First try to get cached snapshot
         const { data: snapshotData } = await db.reportSnapshots()
           .select('data, captured_at')
           .eq('sf_report_id', reportId)
@@ -77,8 +116,14 @@ export function DashboardViewPage() {
           .limit(1)
           .single();
 
-        if (snapshotData) {
+        if (snapshotData && Array.isArray(snapshotData.data) && snapshotData.data.length > 0) {
           dataMap[reportId] = snapshotData as ReportSnapshot;
+        } else {
+          // No cached data, fetch from Salesforce
+          const freshData = await fetchReportData(reportId);
+          if (freshData) {
+            dataMap[reportId] = freshData;
+          }
         }
       }
 
@@ -101,23 +146,20 @@ export function DashboardViewPage() {
       gridRow: `span ${position.h}`,
     };
 
-    // Generate sample data if no real data available
-    const sampleData = data.length > 0 ? data : [
-      { name: 'Sample A', value: 400 },
-      { name: 'Sample B', value: 300 },
-      { name: 'Sample C', value: 200 },
-      { name: 'Sample D', value: 278 },
-      { name: 'Sample E', value: 189 },
+    // Use actual data or show placeholder
+    const hasRealData = data.length > 0;
+    const chartDisplayData = hasRealData ? data : [
+      { name: 'No data', value: 0 },
     ];
 
-    const chartData = sampleData.map((item: Record<string, unknown>) => ({
+    const chartData = chartDisplayData.map((item: Record<string, unknown>) => ({
       name: String(item.name || item.Name || 'Unknown'),
       value: Number(item.value || item.Value || item.Amount || 0),
     }));
 
     // Generate columns for table from data keys
-    const tableColumns = sampleData.length > 0
-      ? Object.keys(sampleData[0]).map(key => ({
+    const tableColumns = chartDisplayData.length > 0
+      ? Object.keys(chartDisplayData[0]).map(key => ({
           key,
           label: key.charAt(0).toUpperCase() + key.slice(1),
         }))
@@ -174,10 +216,16 @@ export function DashboardViewPage() {
           return (
             <div className="h-full">
               <h3 className="text-sm font-medium text-neutral-700 mb-2">{widget.title || 'Data Table'}</h3>
-              <DataTable
-                data={sampleData as Record<string, unknown>[]}
-                columns={tableColumns}
-              />
+              {hasRealData ? (
+                <DataTable
+                  data={chartDisplayData as Record<string, unknown>[]}
+                  columns={tableColumns}
+                />
+              ) : (
+                <div className="flex items-center justify-center h-32 text-neutral-400">
+                  Click Refresh to load data
+                </div>
+              )}
             </div>
           );
       }
@@ -232,6 +280,14 @@ export function DashboardViewPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={refreshData}
+            disabled={refreshing}
+            className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-100 rounded-lg transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+            {refreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
           <button className="p-2 hover:bg-neutral-100 rounded-lg transition-colors">
             <Share2 className="w-5 h-5 text-neutral-600" />
           </button>
