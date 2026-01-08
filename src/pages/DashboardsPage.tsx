@@ -1,15 +1,28 @@
-import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import { Plus, LayoutDashboard, Clock, MoreVertical } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Plus, LayoutDashboard, Clock, MoreVertical, Pencil, Trash2 } from 'lucide-react';
 import { db } from '../lib/supabase';
 import type { Dashboard } from '../types/database';
 
 export function DashboardsPage() {
   const [dashboards, setDashboards] = useState<Dashboard[]>([]);
   const [loading, setLoading] = useState(true);
+  const [menuOpen, setMenuOpen] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     loadDashboards();
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   const loadDashboards = async () => {
@@ -25,6 +38,20 @@ export function DashboardsPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const deleteDashboard = async (id: string, name: string) => {
+    if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+
+    try {
+      const { error } = await db.dashboards().delete().eq('id', id);
+      if (error) throw error;
+      setDashboards(dashboards.filter(d => d.id !== id));
+    } catch (err) {
+      console.error('Error deleting dashboard:', err);
+      alert('Failed to delete dashboard');
+    }
+    setMenuOpen(null);
   };
 
   if (loading) {
@@ -86,15 +113,45 @@ export function DashboardsPage() {
                 <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center">
                   <LayoutDashboard className="w-5 h-5 text-blue-600" />
                 </div>
-                <button
-                  onClick={(e) => {
-                    e.preventDefault();
-                    // TODO: Open menu
-                  }}
-                  className="p-1 rounded hover:bg-neutral-100 opacity-0 group-hover:opacity-100 transition-opacity"
-                >
-                  <MoreVertical className="w-5 h-5 text-neutral-400" />
-                </button>
+                <div className="relative" ref={menuOpen === dashboard.id ? menuRef : null}>
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setMenuOpen(menuOpen === dashboard.id ? null : dashboard.id);
+                    }}
+                    className="p-1 rounded hover:bg-neutral-100 opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <MoreVertical className="w-5 h-5 text-neutral-400" />
+                  </button>
+                  {menuOpen === dashboard.id && (
+                    <div className="absolute right-0 top-8 bg-white rounded-lg shadow-lg border border-neutral-200 py-1 z-10 min-w-[140px]">
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setMenuOpen(null);
+                          navigate(`/dashboards/${dashboard.id}`);
+                        }}
+                        className="w-full px-3 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-50 flex items-center gap-2"
+                      >
+                        <Pencil className="w-4 h-4" />
+                        Edit
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          deleteDashboard(dashboard.id, dashboard.name);
+                        }}
+                        className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        Delete
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
               <h3 className="font-semibold text-neutral-900 mb-1">
                 {dashboard.name}
