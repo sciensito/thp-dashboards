@@ -1,11 +1,27 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Settings, Share2, Loader2, RefreshCw, BarChart3, LineChart as LineChartIcon, PieChart as PieChartIcon, Table, Hash } from 'lucide-react';
+import GridLayout from 'react-grid-layout';
 import { db, supabase } from '../lib/supabase';
 import { BarChart } from '../components/charts/BarChart';
 import { LineChart } from '../components/charts/LineChart';
 import { PieChart } from '../components/charts/PieChart';
 import { DataTable } from '../components/charts/DataTable';
+import 'react-grid-layout/css/styles.css';
+import 'react-resizable/css/styles.css';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const ReactGridLayout = (GridLayout as any).WidthProvider(GridLayout);
+
+interface LayoutItem {
+  i: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  minW?: number;
+  minH?: number;
+}
 
 interface Dashboard {
   id: string;
@@ -41,6 +57,7 @@ export function DashboardViewPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [widgetTypes, setWidgetTypes] = useState<Record<string, string>>({});
+  const [layout, setLayout] = useState<LayoutItem[]>([]);
 
   const chartTypeOptions = [
     { type: 'bar', icon: BarChart3, label: 'Bar' },
@@ -55,6 +72,25 @@ export function DashboardViewPage() {
       loadDashboard(id);
     }
   }, [id]);
+
+  // Generate layout from widgets
+  useEffect(() => {
+    if (widgets.length > 0) {
+      const newLayout = widgets.map((widget, index) => {
+        const pos = widget.position || { x: (index % 2) * 6, y: Math.floor(index / 2) * 4, w: 6, h: 4 };
+        return {
+          i: widget.id,
+          x: pos.x,
+          y: pos.y,
+          w: pos.w,
+          h: pos.h,
+          minW: 2,
+          minH: 2,
+        };
+      });
+      setLayout(newLayout);
+    }
+  }, [widgets]);
 
   const fetchReportData = async (reportId: string): Promise<ReportSnapshot | null> => {
     try {
@@ -151,17 +187,38 @@ export function DashboardViewPage() {
     setWidgetTypes(prev => ({ ...prev, [widgetId]: type }));
   };
 
-  const renderWidget = (widget: Widget) => {
+  const handleLayoutChange = (newLayout: LayoutItem[]) => {
+    setLayout(newLayout);
+
+    // Update widget positions in state
+    const updatedWidgets = widgets.map(widget => {
+      const layoutItem = newLayout.find(l => l.i === widget.id);
+      if (layoutItem) {
+        return {
+          ...widget,
+          position: { x: layoutItem.x, y: layoutItem.y, w: layoutItem.w, h: layoutItem.h }
+        };
+      }
+      return widget;
+    });
+    setWidgets(updatedWidgets);
+  };
+
+  const saveLayout = async () => {
+    // Save updated positions to database
+    for (const widget of widgets) {
+      if (widget.position) {
+        await db.widgets()
+          .update({ position: widget.position })
+          .eq('id', widget.id);
+      }
+    }
+  };
+
+  const renderWidgetContent = (widget: Widget) => {
     const snapshot = widgetData[widget.sf_report_id];
     const data = snapshot?.data || [];
-    const position = widget.position || { x: 0, y: 0, w: 6, h: 3 };
     const currentType = getWidgetType(widget.id, widget.widget_type);
-
-    // Calculate grid position styles
-    const style = {
-      gridColumn: `span ${position.w}`,
-      gridRow: `span ${position.h}`,
-    };
 
     // Use actual data or show placeholder
     const hasRealData = data.length > 0;
@@ -182,93 +239,62 @@ export function DashboardViewPage() {
         }))
       : [{ key: 'name', label: 'Name' }, { key: 'value', label: 'Value' }];
 
-    const widgetContent = () => {
-      switch (currentType) {
-        case 'bar':
-          return (
-            <div className="h-full">
-              <BarChart
-                data={chartData}
-                xKey="name"
-                yKey="value"
-              />
-            </div>
-          );
-        case 'line':
-          return (
-            <div className="h-full">
-              <LineChart
-                data={chartData}
-                xKey="name"
-                yKey="value"
-              />
-            </div>
-          );
-        case 'pie':
-          return (
-            <div className="h-full">
-              <PieChart data={chartData} />
-            </div>
-          );
-        case 'kpi':
-          const total = chartData.reduce((sum, item) => sum + item.value, 0);
-          return (
-            <div className="h-full flex items-center justify-center">
-              <div className="text-center">
-                <p className="text-4xl font-bold text-neutral-900">
-                  {total.toLocaleString()}
-                </p>
-                <p className="text-sm text-neutral-500 mt-1">Total</p>
-              </div>
-            </div>
-          );
-        case 'table':
-        default:
-          return (
-            <div className="h-full overflow-auto">
-              {hasRealData ? (
-                <DataTable
-                  data={chartDisplayData as Record<string, unknown>[]}
-                  columns={tableColumns}
-                />
-              ) : (
-                <div className="flex items-center justify-center h-32 text-neutral-400">
-                  Click Refresh to load data
-                </div>
-              )}
-            </div>
-          );
-      }
-    };
-
-    return (
-      <div key={widget.id} style={style} className="bg-white rounded-xl border border-neutral-200 p-4 min-h-[200px] flex flex-col">
-        {/* Chart type selector */}
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-sm font-medium text-neutral-700">{widget.title || 'Chart'}</h3>
-          <div className="flex items-center gap-1 bg-neutral-100 rounded-lg p-0.5">
-            {chartTypeOptions.map(({ type, icon: Icon, label }) => (
-              <button
-                key={type}
-                onClick={() => setWidgetType(widget.id, type)}
-                title={label}
-                className={`p-1.5 rounded-md transition-colors ${
-                  currentType === type
-                    ? 'bg-white shadow-sm text-blue-600'
-                    : 'text-neutral-400 hover:text-neutral-600'
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-              </button>
-            ))}
+    switch (currentType) {
+      case 'bar':
+        return (
+          <div className="h-full">
+            <BarChart
+              data={chartData}
+              xKey="name"
+              yKey="value"
+            />
           </div>
-        </div>
-        {/* Widget content */}
-        <div className="flex-1 min-h-0">
-          {widgetContent()}
-        </div>
-      </div>
-    );
+        );
+      case 'line':
+        return (
+          <div className="h-full">
+            <LineChart
+              data={chartData}
+              xKey="name"
+              yKey="value"
+            />
+          </div>
+        );
+      case 'pie':
+        return (
+          <div className="h-full">
+            <PieChart data={chartData} />
+          </div>
+        );
+      case 'kpi':
+        const total = chartData.reduce((sum, item) => sum + item.value, 0);
+        return (
+          <div className="h-full flex items-center justify-center">
+            <div className="text-center">
+              <p className="text-4xl font-bold text-neutral-900">
+                {total.toLocaleString()}
+              </p>
+              <p className="text-sm text-neutral-500 mt-1">Total</p>
+            </div>
+          </div>
+        );
+      case 'table':
+      default:
+        return (
+          <div className="h-full overflow-auto">
+            {hasRealData ? (
+              <DataTable
+                data={chartDisplayData as Record<string, unknown>[]}
+                columns={tableColumns}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-32 text-neutral-400">
+                Click Refresh to load data
+              </div>
+            )}
+          </div>
+        );
+    }
   };
 
   if (loading) {
@@ -314,6 +340,12 @@ export function DashboardViewPage() {
         </div>
         <div className="flex items-center gap-2">
           <button
+            onClick={saveLayout}
+            className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-100 rounded-lg transition-colors"
+          >
+            Save Layout
+          </button>
+          <button
             onClick={refreshData}
             disabled={refreshing}
             className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-100 rounded-lg transition-colors disabled:opacity-50"
@@ -337,14 +369,52 @@ export function DashboardViewPage() {
           <p className="text-neutral-500">This dashboard doesn't have any widgets.</p>
         </div>
       ) : (
-        <div
-          className="grid gap-4"
-          style={{
-            gridTemplateColumns: `repeat(${dashboard.layout?.columns || 12}, 1fr)`,
-          }}
+        <ReactGridLayout
+          className="layout"
+          layout={layout}
+          cols={12}
+          rowHeight={80}
+          onLayoutChange={handleLayoutChange}
+          draggableHandle=".widget-drag-handle"
+          isResizable={true}
+          isDraggable={true}
+          margin={[16, 16]}
         >
-          {widgets.map(renderWidget)}
-        </div>
+          {widgets.map((widget) => {
+            const currentType = getWidgetType(widget.id, widget.widget_type);
+            return (
+              <div key={widget.id} className="bg-white rounded-xl border border-neutral-200 shadow-sm overflow-hidden flex flex-col">
+                {/* Widget Header - drag handle */}
+                <div className="widget-drag-handle flex items-center justify-between p-3 border-b border-neutral-100 cursor-move bg-neutral-50/50">
+                  <h3 className="text-sm font-medium text-neutral-700 truncate">{widget.title || 'Chart'}</h3>
+                  <div className="flex items-center gap-1 bg-neutral-100 rounded-lg p-0.5">
+                    {chartTypeOptions.map(({ type, icon: Icon, label }) => (
+                      <button
+                        key={type}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setWidgetType(widget.id, type);
+                        }}
+                        title={label}
+                        className={`p-1.5 rounded-md transition-colors ${
+                          currentType === type
+                            ? 'bg-white shadow-sm text-blue-600'
+                            : 'text-neutral-400 hover:text-neutral-600'
+                        }`}
+                      >
+                        <Icon className="w-4 h-4" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {/* Widget content */}
+                <div className="flex-1 p-4 min-h-0 overflow-hidden">
+                  {renderWidgetContent(widget)}
+                </div>
+              </div>
+            );
+          })}
+        </ReactGridLayout>
       )}
     </div>
   );
