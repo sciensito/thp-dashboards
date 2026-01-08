@@ -157,7 +157,7 @@ export function DashboardViewPage() {
           .eq('sf_report_id', reportId)
           .order('captured_at', { ascending: false })
           .limit(1)
-          .single();
+          .maybeSingle();
 
         if (snapshotData && Array.isArray(snapshotData.data) && snapshotData.data.length > 0) {
           dataMap[reportId] = snapshotData as ReportSnapshot;

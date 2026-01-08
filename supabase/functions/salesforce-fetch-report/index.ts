@@ -5,6 +5,59 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+async function refreshAccessToken(
+  supabaseClient: ReturnType<typeof createClient>,
+  refreshToken: string,
+  instanceUrl: string
+): Promise<string | null> {
+  const clientId = Deno.env.get("SALESFORCE_CLIENT_ID");
+  const clientSecret = Deno.env.get("SALESFORCE_CLIENT_SECRET");
+
+  if (!clientId || !clientSecret) {
+    console.error("Missing Salesforce client credentials");
+    return null;
+  }
+
+  try {
+    const tokenUrl = `${instanceUrl}/services/oauth2/token`;
+    const params = new URLSearchParams({
+      grant_type: "refresh_token",
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+    });
+
+    const response = await fetch(tokenUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Token refresh failed:", errorText);
+      return null;
+    }
+
+    const tokenData = await response.json();
+    const newAccessToken = tokenData.access_token;
+
+    // Update the stored token
+    await supabaseClient
+      .from("sf_connection")
+      .update({
+        access_token_encrypted: newAccessToken,
+        updated_at: new Date().toISOString(),
+      })
+      .single();
+
+    return newAccessToken;
+  } catch (error) {
+    console.error("Token refresh error:", error);
+    return null;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -25,7 +78,7 @@ Deno.serve(async (req) => {
     // Get stored connection
     const { data: connData, error: connError } = await supabaseClient
       .from("sf_connection")
-      .select("access_token_encrypted, instance_url")
+      .select("access_token_encrypted, refresh_token_encrypted, instance_url")
       .single();
 
     if (connError || !connData) {
@@ -36,15 +89,40 @@ Deno.serve(async (req) => {
       throw new Error("Salesforce not connected");
     }
 
+    let accessToken = connData.access_token_encrypted;
+
     // Fetch the report data from Salesforce Analytics API
     const reportUrl = `${connData.instance_url}/services/data/v59.0/analytics/reports/${report_id}`;
 
-    const reportResponse = await fetch(reportUrl, {
+    let reportResponse = await fetch(reportUrl, {
       headers: {
-        Authorization: `Bearer ${connData.access_token_encrypted}`,
+        Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
     });
+
+    // If unauthorized, try to refresh the token
+    if (reportResponse.status === 401 && connData.refresh_token_encrypted) {
+      console.log("Access token expired, attempting refresh...");
+      const newToken = await refreshAccessToken(
+        supabaseClient,
+        connData.refresh_token_encrypted,
+        connData.instance_url
+      );
+
+      if (newToken) {
+        accessToken = newToken;
+        // Retry the request with the new token
+        reportResponse = await fetch(reportUrl, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+        });
+      } else {
+        throw new Error("Failed to refresh Salesforce token. Please reconnect.");
+      }
+    }
 
     if (!reportResponse.ok) {
       const errorText = await reportResponse.text();
