@@ -5,7 +5,6 @@ import { db, supabase } from '../lib/supabase';
 import { BarChart } from '../components/charts/BarChart';
 import { LineChart } from '../components/charts/LineChart';
 import { PieChart } from '../components/charts/PieChart';
-import { KPICard } from '../components/charts/KPICard';
 import { DataTable } from '../components/charts/DataTable';
 
 interface Dashboard {
