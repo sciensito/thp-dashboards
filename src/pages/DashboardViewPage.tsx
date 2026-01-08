@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Settings, Share2, Loader2, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Settings, Share2, Loader2, RefreshCw, BarChart3, LineChart as LineChartIcon, PieChart as PieChartIcon, Table, Hash } from 'lucide-react';
 import { db, supabase } from '../lib/supabase';
 import { BarChart } from '../components/charts/BarChart';
 import { LineChart } from '../components/charts/LineChart';
@@ -41,6 +41,15 @@ export function DashboardViewPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [widgetTypes, setWidgetTypes] = useState<Record<string, string>>({});
+
+  const chartTypeOptions = [
+    { type: 'bar', icon: BarChart3, label: 'Bar' },
+    { type: 'line', icon: LineChartIcon, label: 'Line' },
+    { type: 'pie', icon: PieChartIcon, label: 'Pie' },
+    { type: 'table', icon: Table, label: 'Table' },
+    { type: 'kpi', icon: Hash, label: 'KPI' },
+  ];
 
   useEffect(() => {
     if (id) {
@@ -135,10 +144,19 @@ export function DashboardViewPage() {
     }
   };
 
+  const getWidgetType = (widgetId: string, defaultType: string) => {
+    return widgetTypes[widgetId] || defaultType;
+  };
+
+  const setWidgetType = (widgetId: string, type: string) => {
+    setWidgetTypes(prev => ({ ...prev, [widgetId]: type }));
+  };
+
   const renderWidget = (widget: Widget) => {
     const snapshot = widgetData[widget.sf_report_id];
     const data = snapshot?.data || [];
     const position = widget.position || { x: 0, y: 0, w: 6, h: 3 };
+    const currentType = getWidgetType(widget.id, widget.widget_type);
 
     // Calculate grid position styles
     const style = {
@@ -166,56 +184,49 @@ export function DashboardViewPage() {
       : [{ key: 'name', label: 'Name' }, { key: 'value', label: 'Value' }];
 
     const widgetContent = () => {
-      switch (widget.widget_type) {
+      switch (currentType) {
         case 'bar':
           return (
             <div className="h-full">
-              <h3 className="text-sm font-medium text-neutral-700 mb-2">{widget.title || 'Bar Chart'}</h3>
-              <div className="h-[calc(100%-24px)]">
-                <BarChart
-                  data={chartData}
-                  xKey="name"
-                  yKey="value"
-                />
-              </div>
+              <BarChart
+                data={chartData}
+                xKey="name"
+                yKey="value"
+              />
             </div>
           );
         case 'line':
           return (
             <div className="h-full">
-              <h3 className="text-sm font-medium text-neutral-700 mb-2">{widget.title || 'Line Chart'}</h3>
-              <div className="h-[calc(100%-24px)]">
-                <LineChart
-                  data={chartData}
-                  xKey="name"
-                  yKey="value"
-                />
-              </div>
+              <LineChart
+                data={chartData}
+                xKey="name"
+                yKey="value"
+              />
             </div>
           );
         case 'pie':
           return (
             <div className="h-full">
-              <h3 className="text-sm font-medium text-neutral-700 mb-2">{widget.title || 'Pie Chart'}</h3>
-              <div className="h-[calc(100%-24px)]">
-                <PieChart data={chartData} />
-              </div>
+              <PieChart data={chartData} />
             </div>
           );
         case 'kpi':
           const total = chartData.reduce((sum, item) => sum + item.value, 0);
           return (
-            <KPICard
-              title={widget.title || 'Total'}
-              value={total}
-              format="number"
-            />
+            <div className="h-full flex items-center justify-center">
+              <div className="text-center">
+                <p className="text-4xl font-bold text-neutral-900">
+                  {total.toLocaleString()}
+                </p>
+                <p className="text-sm text-neutral-500 mt-1">Total</p>
+              </div>
+            </div>
           );
         case 'table':
         default:
           return (
-            <div className="h-full">
-              <h3 className="text-sm font-medium text-neutral-700 mb-2">{widget.title || 'Data Table'}</h3>
+            <div className="h-full overflow-auto">
               {hasRealData ? (
                 <DataTable
                   data={chartDisplayData as Record<string, unknown>[]}
@@ -232,8 +243,31 @@ export function DashboardViewPage() {
     };
 
     return (
-      <div key={widget.id} style={style} className="bg-white rounded-xl border border-neutral-200 p-4 min-h-[200px]">
-        {widgetContent()}
+      <div key={widget.id} style={style} className="bg-white rounded-xl border border-neutral-200 p-4 min-h-[200px] flex flex-col">
+        {/* Chart type selector */}
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-medium text-neutral-700">{widget.title || 'Chart'}</h3>
+          <div className="flex items-center gap-1 bg-neutral-100 rounded-lg p-0.5">
+            {chartTypeOptions.map(({ type, icon: Icon, label }) => (
+              <button
+                key={type}
+                onClick={() => setWidgetType(widget.id, type)}
+                title={label}
+                className={`p-1.5 rounded-md transition-colors ${
+                  currentType === type
+                    ? 'bg-white shadow-sm text-blue-600'
+                    : 'text-neutral-400 hover:text-neutral-600'
+                }`}
+              >
+                <Icon className="w-4 h-4" />
+              </button>
+            ))}
+          </div>
+        </div>
+        {/* Widget content */}
+        <div className="flex-1 min-h-0">
+          {widgetContent()}
+        </div>
       </div>
     );
   };
