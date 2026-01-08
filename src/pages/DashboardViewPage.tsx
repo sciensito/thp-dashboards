@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Settings, Share2, Loader2, RefreshCw, BarChart3, LineChart as LineChartIcon, PieChart as PieChartIcon, Table, Hash } from 'lucide-react';
-import GridLayout from 'react-grid-layout';
+import RGL, { WidthProvider } from 'react-grid-layout/legacy';
 import { db, supabase } from '../lib/supabase';
 import { BarChart } from '../components/charts/BarChart';
 import { LineChart } from '../components/charts/LineChart';
@@ -10,8 +10,7 @@ import { DataTable } from '../components/charts/DataTable';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const ReactGridLayout = (GridLayout as any).WidthProvider(GridLayout);
+const ReactGridLayout = WidthProvider(RGL);
 
 interface LayoutItem {
   i: string;
@@ -187,8 +186,8 @@ export function DashboardViewPage() {
     setWidgetTypes(prev => ({ ...prev, [widgetId]: type }));
   };
 
-  const handleLayoutChange = (newLayout: LayoutItem[]) => {
-    setLayout(newLayout);
+  const handleLayoutChange = (newLayout: readonly LayoutItem[]) => {
+    setLayout([...newLayout]);
 
     // Update widget positions in state
     const updatedWidgets = widgets.map(widget => {
